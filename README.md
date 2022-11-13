@@ -9,4 +9,4 @@ Provides an in-game cross server FACEIT hub.
 In order to successfully compile this plugin, you must have these libraries installed:
 1. [Socket Include](https://github.com/JoinedSenses/sm-ext-socket)
 2. [ByteBuffer Include](https://github.com/rumblefrog/SM-ByteBuffer-Inc/blob/master/bytebuffer.inc)
-3. [Faceit-API Includes](https://forums.alliedmods.net/showthread.php?t=307056)c)
+3. [Faceit-API Includes](https://forums.alliedmods.net/showthread.php?t=307056)
