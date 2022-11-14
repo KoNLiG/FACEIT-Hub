@@ -12,6 +12,9 @@
 #define LOBBY_JOIN_HEADER 0x4A // 'J'
 #define LOBBY_INVITE_HEADER 0x49 // 'I'
 
+// Prefix each message with a size header (8 byets as for 64bit systems) that indicates how long the message is.
+#define PACKET_PREFIX_SIZE 8
+
 Socket g_Socket;
 
 void SetupClientSocket()
@@ -48,6 +51,9 @@ void OnSocketConnect(Socket socket, any arg)
 void OnSocketReceive(Socket socket, const char[] receiveData, const int dataSize, any arg)
 {
     ByteBuffer byte_buffer = CreateByteBuffer(_, receiveData, dataSize);
+
+    // First 8 bytes are guaranteed to be 0xFF.
+    byte_buffer.Cursor = PACKET_PREFIX_SIZE;
 
     char header = byte_buffer.ReadByte();
     switch (header)
@@ -194,7 +200,7 @@ void ProcessSyncPacket()
     {
         if (IsClientInGame(current_client) && GetClientAuthId(current_client, AuthId_SteamID64, auth, sizeof(auth)))
         {
-            OnPlayerConnect(auth);
+            OnPlayerConnect(auth, true);
         }
     }
 
@@ -576,11 +582,23 @@ void SendJoinRequestPacket(const char uuid[UUID_LENGTH], const char[] steamid64)
 
 void TransferPacket(ByteBuffer byte_buffer)
 {
-    int size = byte_buffer.Cursor;
+    int size = byte_buffer.Cursor + PACKET_PREFIX_SIZE;
     char[] data = new char[size];
 
     byte_buffer.Dump(data, size);
     byte_buffer.Close();
+
+    // Insert 8 0xFF bytes to overrule Nagle's algorithm.
+    // 8 as for 64bit systems. (since listen servers might use 64bit os, unlike the client server)
+    for (int current_byte; current_byte < size; current_byte++)
+    {
+        data[current_byte + PACKET_PREFIX_SIZE] = data[current_byte];
+
+        if (current_byte < PACKET_PREFIX_SIZE)
+        {
+            data[current_byte] = 0xFF;
+        }
+    }
 
     // Locally trigger the processing procedure of this packet,
     // to avoid unnecessary delays.

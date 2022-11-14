@@ -48,7 +48,6 @@ var host = '0.0.0.0';
 var port = config.port;
 
 net.createServer(sock => {
-
     console.log(`connected: ${sock.remoteAddress}:${sock.remotePort}`);
 
     sock.on('data', (data) => {
@@ -56,7 +55,8 @@ net.createServer(sock => {
 
         data_str = String(data).split("");
 
-        var offset = 0;
+        // Skip the first 8 bytes. (0xFF)
+        var offset = 8;
 
         // '0x4E' as for AUTHORIZE_HEADER
         if (data_str[offset] != 0x4E && socket_manager.IsSocketAuthorized(sock))
@@ -74,8 +74,8 @@ net.createServer(sock => {
         }
     });
 
-    sock.on("error", (err) => {
-        console.log("Caught flash policy server socket error: ");
+    sock.on('error', (err) => {
+        console.log('Caught flash policy server socket error: ');
         console.log(err.stack);
     });
 

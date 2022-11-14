@@ -104,7 +104,7 @@ void Event_PlayerConnect(Event event, const char[] name, bool dontBroadcast)
 
     GetSteam64FromSteam2(networkid, networkid);
 
-    OnPlayerConnect(networkid);
+    OnPlayerConnect(networkid, true);
 }
 
 void Event_PlayerDisconnect(Event event, const char[] name, bool dontBroadcast)
