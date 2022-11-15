@@ -12,9 +12,6 @@
 #define LOBBY_JOIN_HEADER 0x4A // 'J'
 #define LOBBY_INVITE_HEADER 0x49 // 'I'
 
-// Prefix each message with a size header (8 byets as for 64bit systems) that indicates how long the message is.
-#define PACKET_PREFIX_SIZE 8
-
 Socket g_Socket;
 
 void SetupClientSocket()
@@ -43,17 +40,12 @@ void OnSocketConnect(Socket socket, any arg)
         SendSyncPacket();
     }
 
-    PrintToChatAll(" \x04[OnSocketConnect]\x01");
-
     LogMessage("Sucessfully connected to listen server.");
 }
 
 void OnSocketReceive(Socket socket, const char[] receiveData, const int dataSize, any arg)
 {
     ByteBuffer byte_buffer = CreateByteBuffer(_, receiveData, dataSize);
-
-    // First 8 bytes are guaranteed to be 0xFF.
-    byte_buffer.Cursor = PACKET_PREFIX_SIZE;
 
     char header = byte_buffer.ReadByte();
     switch (header)
@@ -136,8 +128,6 @@ void ProcessMessagePacket(ByteBuffer byte_buffer)
     {
         faceit_lobby.members.GetArray(current_member, member);
 
-        PrintToChatAll("[ProcessMessagePacket] %s", member.faceit.nickname);
-
         if (member.IsLocal(client))
         {
             PrintToChat(client, "%s", message);
@@ -184,7 +174,7 @@ void ProcessConnectPacket(ByteBuffer byte_buffer)
         if ((idx = old_player.GetBySteamID64(steamid64)) != -1)
         {
             old_player.Close();
-            old_player.EraseMyself(idx);
+            g_Players.Erase(idx);
         }
     }
 }
@@ -200,7 +190,7 @@ void ProcessSyncPacket()
     {
         if (IsClientInGame(current_client) && GetClientAuthId(current_client, AuthId_SteamID64, auth, sizeof(auth)))
         {
-            OnPlayerConnect(auth, true);
+            OnPlayerConnect(auth);
         }
     }
 
@@ -309,6 +299,8 @@ void ProcessJoinPacket(ByteBuffer byte_buffer)
             faceit_lobby.members.GetArray(LEADER_MEMBER_IDX, leader);
 
             PrintToChatSeperators(client, " \x09You have joined \x0B%s\x09 lobby!\x01", leader.faceit.nickname);
+
+            DisplayLobbyMenu(client, faceit_lobby);
         }
     }
     else
@@ -582,28 +574,43 @@ void SendJoinRequestPacket(const char uuid[UUID_LENGTH], const char[] steamid64)
 
 void TransferPacket(ByteBuffer byte_buffer)
 {
-    int size = byte_buffer.Cursor + PACKET_PREFIX_SIZE;
+    #define PACKET_LENGTH_SIZE 4
+
+    int size = byte_buffer.Cursor + PACKET_LENGTH_SIZE;
     char[] data = new char[size];
 
     byte_buffer.Dump(data, size);
     byte_buffer.Close();
 
-    // Insert 8 0xFF bytes to overrule Nagle's algorithm.
-    // 8 as for 64bit systems. (since listen servers might use 64bit os, unlike the client server)
-    for (int current_byte; current_byte < size; current_byte++)
-    {
-        data[current_byte + PACKET_PREFIX_SIZE] = data[current_byte];
-
-        if (current_byte < PACKET_PREFIX_SIZE)
-        {
-            data[current_byte] = 0xFF;
-        }
-    }
-
     // Locally trigger the processing procedure of this packet,
     // to avoid unnecessary delays.
-    OnSocketReceive(g_Socket, data, size, 0);
+    OnSocketReceive(g_Socket, data, size - PACKET_LENGTH_SIZE, 0);
+
+    // Pass the packet size in the start of the packet, so the listener would know
+    // how many segments there are to process. (Nagle's algorithm)
+    int packet_length[PACKET_LENGTH_SIZE];
+    packet_length[0] = (size & 0x000000FF) & 0x000000FF;
+    packet_length[1] = ((size & 0x0000FF00) >> 8) & 0x000000FF;
+    packet_length[2] = ((size & 0x00FF0000) >> 16) & 0x000000FF;
+    packet_length[3] = ((size & 0xFF000000) >> 24) & 0x000000FF;
+
+    InsertToByteArray(data, size, packet_length, sizeof(packet_length));
 
     // Send packet to the listen server.
     g_Socket.Send(data, size);
+}
+
+// Make sure 'data' allocated size is enough for 'data_length' + 'arr_length'!
+void InsertToByteArray(char[] data, int data_length, const int[] arr, int arr_length)
+{
+    // Right shift all array contents by 'arr_length'.
+    for (int i = data_length - 1; i >= arr_length; i--)
+    {
+        data[i] = data[i - arr_length];
+    }
+
+    for (int i; i < arr_length; i++)
+    {
+        data[i] = arr[i];
+    }
 }

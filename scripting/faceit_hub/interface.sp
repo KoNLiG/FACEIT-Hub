@@ -15,7 +15,19 @@ void DisplayInterfaceMenu(int client)
     menu.SetTitle("%sInterface Menu:\n \n• Create a FACEIT lobby to team-up with\n   other players across all servers!\n ", PREFIX_MENU, g_FaceitLobbies.Length);
 
     char item_display[256];
-    Format(item_display, sizeof(item_display), "Create FACEIT Lobby\n \n◾ Found %d available lobby(s):", g_FaceitLobbies.Length);
+
+    // Check for any cooldown.
+    float game_time = GetGameTime();
+
+    if (player.cooldown.next_lobby_create_time > game_time)
+    {
+        Format(item_display, sizeof(item_display), " [In cooldown for %.2fs]", player.cooldown.next_lobby_create_time - game_time);
+    }
+
+    Format(item_display, sizeof(item_display), "Create FACEIT Lobby%s\n \n◾ Found %d available lobby(s):",
+    player.cooldown.next_lobby_create_time > game_time ? item_display : "", g_FaceitLobbies.Length);
+
+    // FIXME: ... [player.cooldown.next_lobby_create_time <= game_time]
     menu.AddItem("", item_display, !player.GetFaceitLobby() ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
 
     Player leader;
@@ -60,7 +72,15 @@ int Handler_Interface(Menu menu, MenuAction action, int param1, int param2)
 
                     player.CreateFaceitLobby();
 
-                    DisplayInterfaceMenu(client);
+                    FaceitLobby faceit_lobby;
+                    if (player.GetFaceitLobby(faceit_lobby))
+                    {
+                        DisplayLobbyMenu(client, faceit_lobby);
+                    }
+                    else
+                    {
+                        DisplayInterfaceMenu(client);
+                    }
                 }
                 default:
                 {
@@ -157,7 +177,7 @@ void DisplayLobbyMenu(int client, FaceitLobby faceit_lobby)
         Format(item_display, sizeof(item_display), "%s's", leader.faceit.nickname);
     }
 
-    menu.SetTitle("%s%s Lobby:\n \n◾ Information:\n    Avg. ˡᵛˡ%d\n    Avg. %dᴱᴸᴼ\n    %s\n    Type /lc | /chat to access the lobby chat\n ", PREFIX_MENU, item_display, faceit_lobby.GetAverageSkillLevel(), faceit_lobby.GetAverageElo(), faceit_lobby.IsPremiumLobby() ? "PREMIUM" : "̶P̶R̶E̶M̶I̶U̶M̶");
+    menu.SetTitle("%s%s Lobby:\n \n◾ Information:\n    Avg. ˡᵛˡ%d\n    Avg. %dᴱᴸᴼ\n    %s\n ", PREFIX_MENU, item_display, faceit_lobby.GetAverageSkillLevel(), faceit_lobby.GetAverageElo(), faceit_lobby.IsPremiumLobby() ? "PREMIUM" : "̶P̶R̶E̶M̶I̶U̶M̶");
 
     // Pass the info (lobby identifier) as an invisible menu item.
     menu.AddItem(faceit_lobby.uuid, "", ITEMDRAW_IGNORE);
@@ -173,7 +193,7 @@ void DisplayLobbyMenu(int client, FaceitLobby faceit_lobby)
         menu.AddItem("", item_display, online_friends_count ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
     }
 
-    Format(item_display, sizeof(item_display), "%s\n \n◾ %d/%d Members:", is_leader ? "Abandon" : is_member ? "Leave" : "Request To Join!", faceit_lobby.members.Length, faceit_hub_lobby_slots.IntValue);
+    Format(item_display, sizeof(item_display), "%s\n \n◾ %d/%d Members:", is_leader ? "Disband" : is_member ? "Leave" : "Request To Join!", faceit_lobby.members.Length, faceit_hub_lobby_slots.IntValue);
 
     menu.AddItem("", item_display);
 
@@ -204,7 +224,7 @@ void DisplayLobbyMenu(int client, FaceitLobby faceit_lobby)
 
         Format(item_display, sizeof(item_display), "[ˡᵛˡ%d] %s", member.faceit.skill_level, member.faceit.nickname);
         FormatEx(item_info, sizeof(item_info), "%d:%s", PendingPlayer, member.steamid64);
-        menu.AddItem(item_info, item_display);
+        menu.AddItem(item_info, item_display, is_leader ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
     }
 
     if (!is_member)
@@ -264,11 +284,11 @@ int Handler_Lobby(Menu menu, MenuAction action, int param1, int param2)
 
                 DisplayInvitationMenu(client, player.faceit.GetOnlineFriends());
             }
-            else if (StrContains(item_display, "Abandon") != -1)
+            else if (StrContains(item_display, "Disband") != -1)
             {
                 player.CloseFaceitLobby();
 
-                PrintToChat(client, " \x04Successfully abandoned FACEIT lobby.\x01");
+                PrintToChat(client, " \x04Successfully disbanded FACEIT lobby.\x01");
 
                 DisplayInterfaceMenu(client);
             }
@@ -284,6 +304,25 @@ int Handler_Lobby(Menu menu, MenuAction action, int param1, int param2)
             }
             else if (StrContains(item_display, "Request To Join!") != -1)
             {
+                if (player.GetFaceitLobby())
+                {
+                    PrintToChat(client, " \x02You cannot send a lobby join request while being in a lobby of yourself!.\x01");
+                    return 0;
+                }
+
+                // Player is already invited - automatically let the join request go though.
+                if (player.invitations.FindString(faceit_lobby.uuid) != -1)
+                {
+                    faceit_lobby.JoinMember(player);
+                    return 0;
+                }
+
+                if (faceit_lobby.pending_players.FindString(player.steamid64) != -1)
+                {
+                    PrintToChat(client, " \x02There is already an ongoing join request to this lobby!\x01");
+                    return 0;
+                }
+
                 player.SendLobbyJoinRequest(faceit_lobby);
 
                 Player leader;
@@ -367,10 +406,7 @@ void DisplayLobbyMemberMenu(int client, Player member)
 
     bool is_leader;
     FaceitLobby faceit_lobby;
-    if (!player.GetFaceitLobby(faceit_lobby, is_leader))
-    {
-        return;
-    }
+    player.GetFaceitLobby(faceit_lobby, is_leader);
 
     FaceitLobby member_faceit_lobby;
     if (!member.GetFaceitLobby(member_faceit_lobby))
@@ -486,9 +522,14 @@ void DisplayInvitationMenu(int client, ArrayList players)
     {
         players.GetArray(current_player_idx, current_player);
 
+        if (current_player.IsEqual(player))
+        {
+            continue;
+        }
+
         bool in_lobby = current_player.GetFaceitLobby();
 
-        FormatEx(item_display, sizeof(item_display), "[ˡᵛˡ%d] %s (%dᴱᴸᴼ)%s", current_player.faceit.skill_level, current_player.faceit.nickname, current_player.faceit.elo, in_lobby ? " {IN LOBBY}" : "");
+        FormatEx(item_display, sizeof(item_display), "[ˡᵛˡ%d] %s (%dᴱᴸᴼ)%s", current_player.faceit.skill_level, current_player.faceit.nickname, current_player.faceit.elo, in_lobby ? " [IN LOBBY]" : "");
         menu.AddItem(current_player.steamid64, item_display, in_lobby ? ITEMDRAW_DISABLED : ITEMDRAW_DEFAULT);
     }
 
@@ -539,6 +580,13 @@ int Handler_Invitation(Menu menu, MenuAction action, int param1, int param2)
             if (target.invitations.FindString(faceit_lobby.uuid) != -1)
             {
                 PrintToChat(client, " \x02There is already a pending lobby invitation request for %s!\x01", target.faceit.nickname);
+                return 0;
+            }
+
+            // Player has already requested to join, automatically accept them!
+            if (faceit_lobby.pending_players.FindString(target.steamid64) != -1)
+            {
+                faceit_lobby.JoinMember(target);
                 return 0;
             }
 

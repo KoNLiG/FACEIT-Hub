@@ -34,6 +34,10 @@ enum struct FaceitLobby
         this.members = new ArrayList(sizeof(Player));
         this.members.PushArray(leader);
 
+        // Clear leader cache.
+        leader.invitations.Clear();
+        leader.ClearJoinRequests();
+
         this.pending_players = new ArrayList(sizeof(Player));
 
         g_FaceitLobbies.PushArray(this);
@@ -44,6 +48,7 @@ enum struct FaceitLobby
         delete this.members;
         delete this.pending_players;
 
+        this.ClearIncomingInvitations();
         g_FaceitLobbies.Erase(idx);
     }
 
@@ -99,9 +104,39 @@ enum struct FaceitLobby
 
     void InvitationExpire(Player player)
     {
-        SendInvitePacket(this.uuid, player.steamid64, false);
+        char leader_auth[MAX_AUTHID_LENGTH];
+        this.GetLeaderAuth(leader_auth);
+
+        SendInvitePacket(leader_auth, player.steamid64, false);
 
         this.SendMessage(_, " \x09The lobby invite to \x0B%s\x09 has expired.\x01", player.faceit.nickname);
+    }
+
+    void ClearIncomingInvitations()
+    {
+        int my_idx = g_FaceitLobbies.FindString(this.uuid);
+        if (my_idx == -1)
+        {
+            return;
+        }
+
+        Player player;
+        LobbyInvitation lobby_invitation;
+
+        for (int current_player; current_player < g_Players.Length; current_player++)
+        {
+            g_Players.GetArray(current_player, player);
+
+            for (int current_invitation, idx; current_invitation < player.invitations.Length; current_invitation++)
+            {
+                player.invitations.GetArray(current_invitation, lobby_invitation);
+
+                if ((idx = g_FaceitLobbies.FindString(lobby_invitation.uuid)) != -1 && idx == my_idx)
+                {
+                    player.invitations.Erase(current_invitation--);
+                }
+            }
+        }
     }
 
     void GetLeaderAuth(char buffer[MAX_AUTHID_LENGTH])
@@ -278,6 +313,24 @@ enum struct Faceit
     }
 }
 
+// Local relevant data, no need to sync them between
+// servers since they're associating with the player itself.
+enum struct Cooldown
+{
+    // Next time this player could open a new FACEIT lobby. Game time represented.
+    float next_lobby_create_time;
+
+    // Next time this player could send a lobby chat message. Game time represented.
+    float next_lobby_message;
+    //================================//
+    // Must call in 'OnMapStart()'
+    void Reset()
+    {
+        this.next_lobby_create_time = 0.0;
+        this.next_lobby_message = 0.0;
+    }
+}
+
 enum struct Player
 {
     char steamid64[MAX_AUTHID_LENGTH];
@@ -286,6 +339,8 @@ enum struct Player
 
     // All lobby invitations sent in the last 60 seconds (faceit_hub_lobby_invite_expiration.IntValue)
     ArrayList invitations;
+
+    Cooldown cooldown;
 
     //================================//
     void Init(const char[] auth)
@@ -306,14 +361,15 @@ enum struct Player
         {
             if (is_leader)
             {
+                faceit_lobby.SendMessage(_, " \x07The lobby was disbanded because the lobby leader left!\x01");
+
                 this.CloseFaceitLobby();
             }
             else
             {
                 faceit_lobby.KickMember(this);
 
-                // COMPLETEME
-                // faceit_lobby.SendMessage();
+                faceit_lobby.SendMessage(_, " \x0B%s\x07 left the server, therefore they were removed from the party.\x01", this.faceit.nickname);
             }
         }
 
@@ -325,6 +381,8 @@ enum struct Player
         this.faceit.Close();
 
         delete this.invitations;
+
+        this.cooldown.Reset();
     }
 
     bool IsEqual(Player other)
@@ -333,7 +391,7 @@ enum struct Player
     }
 
     // Init functions.
-    int GetBySteamID64(const char[] auth)
+    int GetBySteamID64(const char[] auth, bool copyback = true)
     {
         Player player;
 
@@ -343,7 +401,11 @@ enum struct Player
 
             if (StrEqual(player.steamid64, auth))
             {
-                this = player;
+                if (copyback)
+                {
+                    this = player;
+                }
+
                 return current_player;
             }
         }
@@ -351,7 +413,7 @@ enum struct Player
         return -1;
     }
 
-    bool GetByIndex(int client)
+    bool GetByIndex(int client, int &idx = -1)
     {
         Player player;
 
@@ -362,6 +424,7 @@ enum struct Player
             if (player.GetIndex() == client)
             {
                 this = player;
+                idx = current_player;
                 return true;
             }
         }
@@ -371,7 +434,7 @@ enum struct Player
 
     void UpdateMyself(int idx = -1)
     {
-        if (idx == -1 && (idx = this.GetBySteamID64(this.steamid64)) == -1)
+        if (idx == -1 && (idx = this.GetBySteamID64(this.steamid64, false)) == -1)
         {
             return;
         }
@@ -383,16 +446,6 @@ enum struct Player
         {
             faceit_lobby.members.SetArray(idx, this);
         }
-    }
-
-    void EraseMyself(int idx = -1)
-    {
-        if (idx == -1 && (idx = this.GetBySteamID64(this.steamid64)) == -1)
-        {
-            return;
-        }
-
-        g_Players.Erase(idx);
     }
 
     bool IsLocal(int &client = 0)
@@ -407,6 +460,10 @@ enum struct Player
 
     void CreateFaceitLobby()
     {
+        this.cooldown.next_lobby_create_time = GetGameTime() + faceit_hub_lobby_create_cooldown.FloatValue;
+
+        this.UpdateMyself();
+
         char new_uuid[UUID_LENGTH];
         GenerateLobbyUUID(new_uuid);
 
@@ -561,10 +618,6 @@ void OnFaceitPlayerInitialized(bool valid, Handle hPlayer)
     player.faceit.Init(faceit_player);
 
     player.UpdateMyself(idx);
-
-    FaceitGame recent_csgo_game = view_as<FaceitGame>(view_as<FaceitGames>(faceit_player.GetGames()).GetCSGO());
-
-    PrintToChatAll("[OnFaceitPlayerInitialized] auth: %s, skillLevel: %d, faceitElo: %d", auth, recent_csgo_game.skillLevel, recent_csgo_game.faceitElo);
 }
 
 int GetPlayerBySteamID64(const char[] auth)
@@ -604,7 +657,7 @@ Action Timer_InvitationExpire(Handle timer, DataPack dp)
     }
 
     FaceitLobby faceit_lobby;
-    if (invitor.GetFaceitLobby(faceit_lobby) && player.GetFaceitLobby() && player.invitations.FindString(faceit_lobby.uuid) != -1)
+    if (invitor.GetFaceitLobby(faceit_lobby) && !player.GetFaceitLobby() && player.invitations.FindString(faceit_lobby.uuid) != -1)
     {
         PrintToChatSeperators(client, " \x09The FACEIT lobby invite from \x0B%s\x09 has expired.\x01", invitor.faceit.nickname);
 

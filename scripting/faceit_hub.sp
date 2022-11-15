@@ -1,3 +1,5 @@
+// TODO LIST:
+// 1. Implement max lobby slots by enforcing 'faceit_hub_lobby_slots'
 #include <sourcemod>
 #include <regex>
 #include <socket>
@@ -26,6 +28,8 @@ ConVar faceit_hub_socket_port;
 ConVar faceit_hub_lobby_slots;
 ConVar faceit_hub_lobby_invite_expiration;
 ConVar faceit_hub_lobby_create_message;
+ConVar faceit_hub_lobby_chat_cooldown;
+ConVar faceit_hub_lobby_create_cooldown;
 
 bool g_Lateload;
 
@@ -97,6 +101,20 @@ public void OnPluginEnd()
     }
 }
 
+public void OnMapStart()
+{
+    Player player;
+
+    for (int current_client = 1, idx; current_client <= MaxClients; current_client++)
+    {
+        if (IsClientInGame(current_client) && player.GetByIndex(current_client, idx))
+        {
+            player.cooldown.Reset();
+            player.UpdateMyself(idx);
+        }
+    }
+}
+
 void Event_PlayerConnect(Event event, const char[] name, bool dontBroadcast)
 {
     char networkid[MAX_AUTHID_LENGTH];
@@ -104,7 +122,7 @@ void Event_PlayerConnect(Event event, const char[] name, bool dontBroadcast)
 
     GetSteam64FromSteam2(networkid, networkid);
 
-    OnPlayerConnect(networkid, true);
+    OnPlayerConnect(networkid);
 }
 
 void Event_PlayerDisconnect(Event event, const char[] name, bool dontBroadcast)

@@ -30,6 +30,8 @@ void InitializeCvars()
     faceit_hub_lobby_slots = CreateConVar("faceit_hub_lobby_slots", "5", "Provided amount of player slots per FACEIT lobby.", .hasMin = true, .min = 2.0);
     faceit_hub_lobby_invite_expiration = CreateConVar("faceit_hub_lobby_invite_expiration", "60", "Time in seconds that a FACEIT lobby invitation lasts for.");
     faceit_hub_lobby_create_message = CreateConVar("faceit_hub_lobby_create_message", "1", "Whether to send a global chat message once a new FACEIT lobby has created.", .hasMin = true, .hasMax = true, .max = 1.0);
+    faceit_hub_lobby_chat_cooldown = CreateConVar("faceit_hub_lobby_chat_cooldown", "1.0", "Cooldown between FACEIT lobby chat messages. Seconds represented.", .hasMin = true, .min = 0.5);
+    faceit_hub_lobby_create_cooldown = CreateConVar("faceit_hub_lobby_create_cooldown", "60.0", "Cooldown after creating new FACEIT lobby. Seconds represented.", .hasMin = true, .min = 15.0);
 
     AutoExecConfig();
 
@@ -141,8 +143,10 @@ Action Command_LobbyChat(int client, int argc)
         return Plugin_Handled;
     }
 
+    int idx;
     Player player;
-    if (!player.GetByIndex(client))
+
+    if (!player.GetByIndex(client, idx))
     {
         return Plugin_Handled;
     }
@@ -151,6 +155,12 @@ Action Command_LobbyChat(int client, int argc)
     if (!player.GetFaceitLobby(faceit_lobby))
     {
         PrintToChat(client, " \x02You are not in any FACEIT lobby!\x01");
+        return Plugin_Handled;
+    }
+
+    float game_time = GetGameTime();
+    if (player.cooldown.next_lobby_message > game_time)
+    {
         return Plugin_Handled;
     }
 
@@ -163,8 +173,12 @@ Action Command_LobbyChat(int client, int argc)
         return Plugin_Handled;
     }
 
-    Format(message, sizeof(message), " \x0CLobby\x01 > %s%s\x01 : %s", g_ServerName, player.faceit.nickname, message);
+    // Update player cooldown.
+    player.cooldown.next_lobby_message = game_time + faceit_hub_lobby_chat_cooldown.FloatValue;
+    player.UpdateMyself(idx);
 
+    // Send a lobby message!
+    Format(message, sizeof(message), " \x0CLobby\x01 > %s%s\x01 : %s", g_ServerName, player.faceit.nickname, message);
     faceit_lobby.SendMessage(false, message);
 
     return Plugin_Handled;
