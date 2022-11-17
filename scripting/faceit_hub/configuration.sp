@@ -130,7 +130,10 @@ Action Command_Join(int client, int argc)
         return Plugin_Handled;
     }
 
-    faceit_lobby.JoinMember(player);
+    if (!faceit_lobby.JoinMember(player))
+    {
+        PrintToChat(client, " \x02There is no available lobby slot for you.\x01");
+    }
 
     return Plugin_Handled;
 }

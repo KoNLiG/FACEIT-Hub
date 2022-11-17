@@ -1,5 +1,3 @@
-// TODO LIST:
-// 1. Implement max lobby slots by enforcing 'faceit_hub_lobby_slots'
 #include <sourcemod>
 #include <regex>
 #include <socket>
@@ -18,7 +16,7 @@
 #define LINE_BREAK "\xE2\x80\xA9"
 
 #define SEPERATOR " \x0C\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E" ... \
-"\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF"
+                  "\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF\xE2\x8E\xAF"
 
 // ConVars definitions. Handled in 'configuration.sp'
 ConVar faceit_hub_socket_key;
@@ -64,8 +62,6 @@ public void OnPluginStart()
     RegisterCommands();
 
     InitializeGlobals();
-
-    SetupClientSocket();
 
     // 'OnClientAuthorized'/'OnClientDisconnect' replacements.
     HookEvent("player_connect", Event_PlayerConnect);
@@ -115,6 +111,11 @@ public void OnMapStart()
     }
 }
 
+public void OnConfigsExecuted()
+{
+    SetupClientSocket();
+}
+
 void Event_PlayerConnect(Event event, const char[] name, bool dontBroadcast)
 {
     char networkid[MAX_AUTHID_LENGTH];
@@ -134,9 +135,9 @@ void Event_PlayerDisconnect(Event event, const char[] name, bool dontBroadcast)
     }
 }
 
-void OnPlayerConnect(const char[] steamid64, bool late_load = false)
+void OnPlayerConnect(const char[] steamid64)
 {
-    SendPlayerConnectPacket(steamid64, .late_load = late_load);
+    SendPlayerConnectPacket(steamid64);
 }
 
 void OnPlayerDisconnect(int client)

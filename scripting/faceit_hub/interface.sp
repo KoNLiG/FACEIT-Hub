@@ -21,14 +21,13 @@ void DisplayInterfaceMenu(int client)
 
     if (player.cooldown.next_lobby_create_time > game_time)
     {
-        Format(item_display, sizeof(item_display), " [In cooldown for %.2fs]", player.cooldown.next_lobby_create_time - game_time);
+        Format(item_display, sizeof(item_display), " [In cooldown for %ds]", RoundFloat(player.cooldown.next_lobby_create_time - game_time));
     }
 
     Format(item_display, sizeof(item_display), "Create FACEIT Lobby%s\n \n◾ Found %d available lobby(s):",
     player.cooldown.next_lobby_create_time > game_time ? item_display : "", g_FaceitLobbies.Length);
 
-    // FIXME: ... [player.cooldown.next_lobby_create_time <= game_time]
-    menu.AddItem("", item_display, !player.GetFaceitLobby() ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
+    menu.AddItem("", item_display, !player.GetFaceitLobby() && player.cooldown.next_lobby_create_time <= game_time ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
 
     Player leader;
     FaceitLobby faceit_lobby;
@@ -313,7 +312,11 @@ int Handler_Lobby(Menu menu, MenuAction action, int param1, int param2)
                 // Player is already invited - automatically let the join request go though.
                 if (player.invitations.FindString(faceit_lobby.uuid) != -1)
                 {
-                    faceit_lobby.JoinMember(player);
+                    if (!faceit_lobby.JoinMember(player))
+                    {
+                        PrintToChat(client, " \x02There is no available lobby slot for you.\x01");
+                    }
+
                     return 0;
                 }
 
@@ -354,7 +357,10 @@ int Handler_Lobby(Menu menu, MenuAction action, int param1, int param2)
                         return 0;
                     }
 
-                    faceit_lobby.JoinMember(target);
+                    if (!faceit_lobby.JoinMember(target))
+                    {
+                        PrintToChat(client, " \x02There is no available lobby slot for %s.\x01", target.faceit.nickname);
+                    }
                 }
             }
         }
@@ -522,7 +528,7 @@ void DisplayInvitationMenu(int client, ArrayList players)
     {
         players.GetArray(current_player_idx, current_player);
 
-        if (current_player.IsEqual(player))
+        if (current_player.IsEqual(player) || !current_player.faceit.IsLoaded())
         {
             continue;
         }
@@ -586,7 +592,11 @@ int Handler_Invitation(Menu menu, MenuAction action, int param1, int param2)
             // Player has already requested to join, automatically accept them!
             if (faceit_lobby.pending_players.FindString(target.steamid64) != -1)
             {
-                faceit_lobby.JoinMember(target);
+                if (!faceit_lobby.JoinMember(target))
+                {
+                    PrintToChat(client, " \x02There is no available lobby slot for %s.\x01", target.faceit.nickname);
+                }
+
                 return 0;
             }
 
@@ -693,7 +703,10 @@ int Handler_IncomeInvitations(Menu menu, MenuAction action, int param1, int para
             return 0;
         }
 
-        faceit_lobby.JoinMember(player);
+        if (!faceit_lobby.JoinMember(player))
+        {
+            PrintToChat(client, " \x02There is no available lobby slot for you.\x01");
+        }
     }
     else if (action == MenuAction_End)
     {

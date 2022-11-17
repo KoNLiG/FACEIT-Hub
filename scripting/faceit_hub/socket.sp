@@ -35,10 +35,8 @@ void OnSocketConnect(Socket socket, any arg)
     // Authorize myself against the listen server.
     SendAuthorizePacket();
 
-    if (g_Lateload)
-    {
-        SendSyncPacket();
-    }
+    // Always send a sync packet, regardless of whether we late loaded or not.
+    SendSyncPacket();
 
     LogMessage("Sucessfully connected to listen server.");
 }
@@ -48,6 +46,7 @@ void OnSocketReceive(Socket socket, const char[] receiveData, const int dataSize
     ByteBuffer byte_buffer = CreateByteBuffer(_, receiveData, dataSize);
 
     char header = byte_buffer.ReadByte();
+
     switch (header)
     {
         case MESSAGE_HEADER:
@@ -56,7 +55,7 @@ void OnSocketReceive(Socket socket, const char[] receiveData, const int dataSize
         }
         case PLAYER_CONNECT_HEADER:
         {
-            ProcessConnectPacket(byte_buffer);
+            ProcessPlayerConnectPacket(byte_buffer);
         }
         case SYNC_HEADER:
         {
@@ -81,18 +80,6 @@ void OnSocketReceive(Socket socket, const char[] receiveData, const int dataSize
     }
 
     byte_buffer.Close();
-
-    if (g_Lateload)
-    {
-        CreateTimer(1.0, Tiemr_DisableLateloadMode);
-    }
-}
-
-Action Tiemr_DisableLateloadMode(Handle timer)
-{
-    g_Lateload = false;
-
-    return Plugin_Continue;
 }
 
 //==================================== [Packet Processing] ====================================//
@@ -141,7 +128,7 @@ void ProcessMessagePacket(ByteBuffer byte_buffer)
  *  2) Boolean which determines whether we should connect/disconnect the provided player
  *  3) Boolean which determines about lateload
  */
-void ProcessConnectPacket(ByteBuffer byte_buffer)
+void ProcessPlayerConnectPacket(ByteBuffer byte_buffer)
 {
     char steamid64[MAX_AUTHID_LENGTH];
     byte_buffer.ReadString(steamid64, sizeof(steamid64));
@@ -194,7 +181,46 @@ void ProcessSyncPacket()
         }
     }
 
-    CreateTimer(0.1, SendFaceitLobbies);
+    // Only sync players if we're late loading.
+    if (g_Lateload)
+    {
+        return;
+    }
+
+    Player player;
+    FaceitLobby faceit_lobby;
+
+    for (int current_player; current_player < g_Players.Length; current_player++)
+    {
+        g_Players.GetArray(current_player, player);
+
+        bool is_leader;
+        if (!player.GetFaceitLobby(faceit_lobby, is_leader))
+        {
+            continue;
+        }
+
+        if (is_leader)
+        {
+            SendLobbyCreatePacket(faceit_lobby.uuid, player.steamid64, .late_load = true);
+        }
+        else
+        {
+            SendJoinPacket(faceit_lobby.uuid, player.steamid64, .late_load = true);
+        }
+    }
+
+    if (g_Lateload)
+    {
+        CreateTimer(1.0, Timer_DisableLateloadMode);
+    }
+}
+
+Action Timer_DisableLateloadMode(Handle timer)
+{
+    g_Lateload = false;
+
+    return Plugin_Continue;
 }
 
 /*
@@ -475,35 +501,6 @@ void SendSyncPacket()
     byte_buffer.WriteByte(SYNC_HEADER);
 
     TransferPacket(byte_buffer);
-}
-
-// FIXME: Broken pipe temp fix
-Action SendFaceitLobbies(Handle timer)
-{
-    Player player;
-    FaceitLobby faceit_lobby;
-
-    for (int current_player; current_player < g_Players.Length; current_player++)
-    {
-        g_Players.GetArray(current_player, player);
-
-        bool is_leader;
-        if (!player.GetFaceitLobby(faceit_lobby, is_leader))
-        {
-            continue;
-        }
-
-        if (is_leader)
-        {
-            SendLobbyCreatePacket(faceit_lobby.uuid, player.steamid64, .late_load = true);
-        }
-        else
-        {
-            SendJoinPacket(faceit_lobby.uuid, player.steamid64, .late_load = true);
-        }
-    }
-
-    return Plugin_Continue;
 }
 
 void SendLobbyCreatePacket(const char uuid[UUID_LENGTH], const char[] steamid64, bool create = true, bool late_load = false)

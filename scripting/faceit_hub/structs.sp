@@ -72,11 +72,19 @@ enum struct FaceitLobby
         return StrEqual(this.uuid, other.uuid);
     }
 
-    void JoinMember(Player player)
+    bool JoinMember(Player player)
     {
+        // Restrict lobby slots.
+        if (this.members.Length >= faceit_hub_lobby_slots.IntValue)
+        {
+            return false;
+        }
+
         this.SendMessage(_, " \x0B%s\x09 joined the lobby.\x01", player.faceit.nickname);
 
         SendJoinPacket(this.uuid, player.steamid64);
+
+        return true;
     }
 
     void KickMember(Player player, bool removed = false)
